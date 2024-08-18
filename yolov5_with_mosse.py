@@ -1,84 +1,69 @@
 import torch
 import cv2
+import time
 
-# Load the YOLOv5 model
+from cv2 import resize
+
+
 model = torch.hub.load('ultralytics/yolov5', 'custom', path='deneme.onnx')
 
-# Open video file or capture from webcam
-cap = cv2.VideoCapture('640640.mp4')  # Replace with 0 to use webcam
-
+cap = cv2.VideoCapture('videolar/deneme.mp4')
 class Dogfight:
     def __init__(self):
-        self.mosse_tracker = None  # Initialize MOSSE tracker as None
+        self.mosse_tracker = None
+        self.tracking_active = False
+        self.yolo_active = True
         self.yolo()
 
     def yolo(self):
+
+        self.prev_time = time.time()
+        self.frame_count = 0
+        self.fps_display = 0
+
         while cap.isOpened():
             self.ret, self.frame = cap.read()
             if not self.ret:
                 break
 
-            if self.mosse_tracker is None:
-                # Run YOLO detection
-                self.results = model(self.frame)
-                detections = self.results.xyxy[0]
-
-                if len(detections) > 0:
-                    # Assuming we're tracking the first detected object
-                    x1, y1, x2, y2, conf, cls = detections[0].numpy()
-                    bbox = (int(x1), int(y1), int(x2-x1), int(y2-y1))
-
-                    # Initialize MOSSE tracker with the first detected object's bounding box
-                    self.mosse_tracker = cv2.legacy.TrackerMOSSE_create()
-                    self.mosse_tracker.init(self.frame, bbox)
-
-            else:
-                # Update MOSSE tracker
-                success, bbox = self.mosse_tracker.update(self.frame)
-                if success:
-                    x, y, w, h = [int(v) for v in bbox]
-                    cv2.rectangle(self.frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                else:
-                    # If tracking fails, reset the tracker and switch back to YOLO detection
-                    self.mosse_tracker = None
+            self.frame = resize(self.frame, (640, 640))
 
             self.kareciz()
 
-            # Draw lines from the center to detected objects if any
-            if self.mosse_tracker is None:
-                self.cizgi_cikar()
+            if self.tracking_active and self.mosse_tracker is not None:
+                self.mosse()
+            else:
+                if self.yolo_active:
+                    self.run_yolo()
 
-            # Check if tracked object is inside the square
-            if self.mosse_tracker is not None:
-                self.check_inside(bbox)
+            self.fps()
 
-            cv2.imshow('YOLOv5 Video', self.frame)
+            cv2.imshow('YOLOv5 with MOSSE', self.frame)
 
-            # Exit on 'q' key press
-            if cv2.waitKey(30) & 0xFF == ord('q'):
+
+            key = cv2.waitKey(30) & 0xFF
+            if key == ord('q'):
                 break
+            elif key == ord('r'):
+                self.reset_tracking()
 
-        # Release video capture and close windows
+
         cap.release()
         cv2.destroyAllWindows()
 
     def kareciz(self):
-        # Create a writable copy of the frame
         self.frame = self.frame.copy()
 
-        # Define the size of the square (for example, 300x300 pixels)
         square_size = 300
 
-        # Get frame dimensions
+
         height, width, _ = self.frame.shape
 
-        # Calculate the top-left and bottom-right coordinates of the square
         self.top_left_x = (width - square_size) // 2
         self.top_left_y = (height - square_size) // 2
         self.bottom_right_x = self.top_left_x + square_size
         self.bottom_right_y = self.top_left_y + square_size
 
-        # Draw the square in the center of the frame
         cv2.rectangle(self.frame, (self.top_left_x, self.top_left_y), (self.bottom_right_x, self.bottom_right_y), (255, 0, 0), 2)
 
     def check_inside(self, bbox):
@@ -88,7 +73,6 @@ class Dogfight:
 
         if (self.top_left_x <= center_x <= self.bottom_right_x) and (
                 self.top_left_y <= center_y <= self.bottom_right_y):
-            # Draw "INSIDE" text on the frame
             cv2.putText(self.frame, "INSIDE", (self.top_left_x + 10, self.top_left_y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
@@ -96,22 +80,66 @@ class Dogfight:
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (160, 100, 100), 2)
 
     def cizgi_cikar(self):
-        # Get frame dimensions
         height, width, _ = self.frame.shape
 
-        # Determine the center of the frame
         center_x = width // 2
         center_y = height // 2
 
-        # Draw lines from the center to each detected object's center
         for det in self.results.xyxy[0]:
             x1, y1, x2, y2, conf, cls = det.numpy()
 
-            # Calculate the center of the detected object
             object_center_x = (x1 + x2) / 2
             object_center_y = (y1 + y2) / 2
 
-            # Draw a line from the center of the frame to the center of the detected object
             cv2.line(self.frame, (center_x, center_y), (int(object_center_x), int(object_center_y)), (0, 255, 0), 2)
+
+    def mosse(self):
+        if self.mosse_tracker is not None:
+            success, bbox = self.mosse_tracker.update(self.frame)
+            if success:
+                x, y, w, h = [int(v) for v in bbox]
+                cv2.rectangle(self.frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                self.check_inside(bbox)
+            else:
+                self.reset_tracking()
+
+    def run_yolo(self):
+        self.results = model(self.frame)
+        detections = self.results.xyxy[0]
+
+        if len(detections) > 0:
+            x1, y1, x2, y2, conf, cls = detections[0].numpy()
+
+            bbox_padding = 10
+            x1 = max(0, x1 - bbox_padding)
+            y1 = max(0, y1 - bbox_padding)
+            x2 = min(self.frame.shape[1], x2 + bbox_padding)
+            y2 = min(self.frame.shape[0], y2 + bbox_padding)
+
+            bbox = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+            self.mosse_tracker = cv2.legacy.TrackerMOSSE_create()
+            self.mosse_tracker.init(self.frame, bbox)
+            self.tracking_active = True
+            self.yolo_active = False
+
+        self.cizgi_cikar()
+
+    def fps(self):
+        self.frame_count += 1
+        current_time = time.time()
+        elapsed_time = current_time - self.prev_time
+
+        if elapsed_time >= 1.0:
+            self.fps_display = self.frame_count / elapsed_time
+            self.frame_count = 0
+            self.prev_time = current_time
+
+        cv2.putText(self.frame, f'FPS: {int(self.fps_display)}', (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+    def reset_tracking(self):
+        self.mosse_tracker = None
+        self.tracking_active = False
+        self.yolo_active = True  
 
 Dogfight()
