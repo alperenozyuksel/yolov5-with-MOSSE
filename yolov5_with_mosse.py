@@ -5,9 +5,9 @@ import time
 from cv2 import resize
 
 
-model = torch.hub.load('ultralytics/yolov5', 'custom', path='deneme.onnx')
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='models/deneme.onnx')
 
-cap = cv2.VideoCapture('videolar/deneme.mp4')
+cap = cv2.VideoCapture('videos/deneme.mp4')
 class Dogfight:
     def __init__(self):
         self.mosse_tracker = None
@@ -140,6 +140,6 @@ class Dogfight:
     def reset_tracking(self):
         self.mosse_tracker = None
         self.tracking_active = False
-        self.yolo_active = True  
+        self.yolo_active = True
 
 Dogfight()
